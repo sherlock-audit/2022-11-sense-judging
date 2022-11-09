@@ -1,1 +1,0 @@
-i don't think this is possible, because the "firstDeposit()" that happens in roll()
