@@ -3,7 +3,7 @@
 Source: https://github.com/sherlock-audit/2022-11-sense-judging/issues/50 
 
 ## Found by 
-ak1
+ctf\_sec, ak1, 0xSmartContract
 
 ## Summary
 Most of the share based vault implementation will face this issue.
@@ -378,7 +378,7 @@ Even the trusted caller should not be allowed to create auto roller with maturit
 Source: https://github.com/sherlock-audit/2022-11-sense-judging/issues/48 
 
 ## Found by 
-8olidity, 0x52, supernova, ctf\_sec, pashov, cryptphi, minhquanym
+supernova, 0x52, minhquanym, 8olidity, ctf\_sec, cryptphi, pashov
 
 ## Summary
 The approve() function in RollerPeriphery contract allows anyone to spend ERC20 token owned by the contract
@@ -427,147 +427,12 @@ Grouping all as medium as they point out the same flaw with different impacts.
 
 
 
-# Issue M-2: Missing ReEntrancy Guard to `claimRewards` function 
-
-Source: https://github.com/sherlock-audit/2022-11-sense-judging/issues/40 
-
-## Found by 
-0xSmartContract
-
-## Summary
-There is no re-entry risk on true ERC-20 tokens that work according to the spec (i.e. audited, etc.).
-
-However you can write a malicious ERC-20 with custom safetransferFrom() or approve() that have re-entrancy hooks to attack a target.
-
-Furthermore ERC-777 is backwards compatible token standard with ERC-20 standard. ERC-777 has better usability, but it has transfer hooks that can cause re-entrancy.
-
-
-## Vulnerability Detail
-ERC20 generally doesn't result in reentrancy, however ERC777 tokens can and they can maskerade as ERC20. So if a contract interacts with unknown ERC20 tokens it is better to be safe and consider that transfers can create reentrancy problems.
-
-## Impact
-Although reentrancy attack is considered quite old over the past two years, there have been cases such as:
-
-Uniswap/LendfMe hacks (2020) ($25 mln, attacked by a hacker using a reentrancy)
-
-The BurgerSwap hack (May 2021) ( $7.2 million because of a fake token contract and a reentrancy exploit.)
-
-The SURGEBNB hack (August 2021) ($4 million seems to be a reentrancy-based price manipulation attack.)
-
-CREAM FINANCE hack (August 2021) ($18.8 million, reentrancy vulnerability allowed the exploiter for the second borrow.)
-
-Siren protocol hack (September 2021) ($3.5 million, AMM pools were exploited through reentrancy attack.)
-
-Type of Reentrancy
-
-[Details](https://inspexco.medium.com/cross-contract-reentrancy-attack-402d27a02a15)
-1 - Single Function Reentrancy
-2 - Cross-Function Reentrancy
-3 - Cross-Contract Reentrancy
-
-
-## Code Snippet
-
-Must be re-entrancy guard to below functions;
-
-
-[AutoRoller.sol#L654-L659](https://github.com/sherlock-audit/2022-11-sense/blob/main/contracts/src/AutoRoller.sol#L654-L659)
-
-[AutoRoller.sol#L715](https://github.com/sherlock-audit/2022-11-sense/blob/main/contracts/src/AutoRoller.sol#L715)
-
-
-```solidity
-contracts/src/AutoRoller.sol:
-  709      /// @param coin address of the coin to transfer out.
-  710:     function claimRewards(ERC20 coin) external {
-  711:         require(coin != asset);
-  712:         if (maturity != MATURITY_NOT_SET) {
-  713:             require(coin != ERC20(address(yt)) && coin != pt && coin != ERC20(address(space)));
-  714:         }
-  715:         coin.transfer(rewardRecipient, coin.balanceOf(address(this)));
-  716:     }
-
-
-contracts/src/AutoRoller.sol:
-  635      /// @return isExcessPTs Whether the excess token is a YT or PT.
-  636:     function eject(
-  637:         uint256 shares,
-  638:         address receiver,
-  639:         address owner
-  640:     ) public returns (uint256 assets, uint256 excessBal, bool isExcessPTs) {
-  641:         if (maturity == MATURITY_NOT_SET) revert ActivePhaseOnly();
-  642: 
-  643:         if (msg.sender != owner) {
-  644:             uint256 allowed = allowance[owner][msg.sender]; // Saves gas for limited approvals.
-  645: 
-  646:             if (allowed != type(uint256).max) allowance[owner][msg.sender] = allowed - shares;
-  647:         }
-  648: 
-  649:         (excessBal, isExcessPTs) = _exitAndCombine(shares);
-  650: 
-  651:         _burn(owner, shares); // Burn after percent ownership is determined in _exitAndCombine.
-  652: 
-  653:         if (isExcessPTs) {
-  654:             pt.transfer(receiver, excessBal);
-  655:         } else {
-  656:             yt.transfer(receiver, excessBal);
-  657:         }
-  658: 
-  659:         asset.transfer(receiver, assets = asset.balanceOf(address(this)));
-  660:         emit Ejected(msg.sender, receiver, owner, assets, shares,
-  661:             isExcessPTs ? excessBal : 0,
-  662:             isExcessPTs ? 0 : excessBal
-  663:         );
-  664:     }
-```
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-Use Openzeppelin or Solmate Re-Entrancy pattern
-
-Here is a example of a re-entracy guard
-
-```solidity
-pragma solidity 0.8.13;
-
-contract ReEntrancyGuard {
-    bool internal locked;
-
-    modifier noReentrant() {
-        require(!locked, "No re-entrancy");
-        locked = true;
-        _;
-        locked = false;
-    }
-}
-```
-
-## Discussion
-
-**jparklev**
-
-Assets are not expected to re-enter and we don't think reward tokens re-entering on claimRewards would cause a problem. Nevertheless, it's a fair suggestion overall and we'll likely make this change
-
-**jparklev**
-
-Fix: https://github.com/sense-finance/auto-roller/pull/19
-
-**aktech297**
-
-Changes are fine. 
-I would suggest to add the reentrancy guard for eject function too.
-
-
-
-# Issue M-3: Vulnerability related to ‘Optimizer Bug Regarding Memory Side Effects of Inline Assembly’ 
+# Issue M-2: Vulnerability related to ‘Optimizer Bug Regarding Memory Side Effects of Inline Assembly’ 
 
 Source: https://github.com/sherlock-audit/2022-11-sense-judging/issues/39 
 
 ## Found by 
-0xSmartContract, 0xheynacho
+0xheynacho, 0xSmartContract
 
 ## Summary
 Solidity versions 0.8.13 and 0.8.14 are vulnerable to a recently reported [optimizer bug](https://blog.soliditylang.org/2022/06/15/inline-assembly-memory-side-effects-bug/) related to inline assembly. Solidity 0.8.15 has been released with a fix.
@@ -626,7 +491,7 @@ Verified the fix. The contracts are  updated with 0.8.15 compiler version.
 
 
 
-# Issue M-4: AutoRoller.sol#roll can revert if lastSettle is zero because solmate ERC4626 deposit revert if previewDeposit returns 0 
+# Issue M-3: AutoRoller.sol#roll can revert if lastSettle is zero because solmate ERC4626 deposit revert if previewDeposit returns 0 
 
 Source: https://github.com/sherlock-audit/2022-11-sense-judging/issues/33 
 
@@ -770,7 +635,7 @@ Further adding, a simple test is needed to ensure the function flow to confirm w
 
 
 
-# Issue M-5: Math rounding in AutoRoller.sol is not ERC4626-complicant: previewWithdraw should round up. 
+# Issue M-4: Math rounding in AutoRoller.sol is not ERC4626-complicant: previewWithdraw should round up. 
 
 Source: https://github.com/sherlock-audit/2022-11-sense-judging/issues/30 
 
@@ -905,7 +770,7 @@ Verified the fix. As @jparklev mentioned, `rounding needs to be in the answer as
 
 
 
-# Issue M-6: Hardcoded divider address in RollerUtils is incorrect and will brick autoroller 
+# Issue M-5: Hardcoded divider address in RollerUtils is incorrect and will brick autoroller 
 
 Source: https://github.com/sherlock-audit/2022-11-sense-judging/issues/19 
 
@@ -963,7 +828,7 @@ As a suggestion, input address can be validated.
 
 
 
-# Issue M-7: Code does not handle ERC20 tokens with special `transfer` implementation 
+# Issue M-6: Code does not handle ERC20 tokens with special `transfer` implementation 
 
 Source: https://github.com/sherlock-audit/2022-11-sense-judging/issues/10 
 
