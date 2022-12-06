@@ -23,6 +23,7 @@ I am sharing reference for this type of issue that already reported and acknowle
 https://github.com/sherlock-audit/2022-08-sentiment-judging#issue-h-1-a-malicious-early-userattacker-can-manipulate-the-ltokens-pricepershare-to-take-an-unfair-share-of-future-users-deposits:~:text=Issue%20H%2D1%3A%20A%20malicious%20early%20user/attacker%20can%20manipulate%20the%20LToken%27s%20pricePerShare%20to%20take%20an%20unfair%20share%20of%20future%20users%27%20deposits
 
 ERC4626 implementation
+
     function mint(uint256 shares, address receiver) public virtual returns (uint256 assets) {
         assets = previewMint(shares); // No need to check for rounding error, previewMint rounds up.
 
@@ -52,6 +53,7 @@ This could directly affect on the attrition of users towards this system.
 https://github.com/sherlock-audit/2022-11-sense/blob/main/contracts/src/RollerPeriphery.sol#L59-L79
 
 ERC4626 implementation
+
     function mint(uint256 shares, address receiver) public virtual returns (uint256 assets) {
         assets = previewMint(shares); // No need to check for rounding error, previewMint rounds up.
 
@@ -84,9 +86,69 @@ Consider requiring a minimal amount of share tokens to be minted for the first m
 
 Depositor can bypass this initial deposit https://github.com/sherlock-audit/2022-11-sense/blob/main/contracts/src/AutoRoller.sol#L160
 
+**jacksanford1**
+
+Bringing in a Discord comment from the protocol team:
+
+> We decided that, in practice, the deployer would roll into the first series immediately, eliminating the conditions for this issue. so, the solution is more on the user layer, and we may come back to fix this on the contract layer in a future iteration.
+
+Categorized as "acknowledged."
 
 
-# Issue H-2: AutoRoller#eject can be used to steal all the yield from vault's YTs 
+
+# Issue H-2: Possible DOS in RollerPeriphery `approve()` function 
+
+Source: https://github.com/sherlock-audit/2022-11-sense-judging/issues/46 
+
+## Found by 
+minhquanym
+
+## Summary
+https://github.com/sherlock-audit/2022-11-sense/blob/main/contracts/src/RollerPeriphery.sol#L100-L102
+
+## Vulnerability Detail
+Function `approve(...)` is public and can be called by anyone, so attacker can simply call this function with `amount = 0`. This will effectively prevent depositing/minting in vault.
+
+## Impact
+DOS minting and depositing functionalities in RollerPeriphery
+
+## Code Snippet
+```solidity
+function approve(ERC20 token, address to, uint256 amount) public payable {
+    token.safeApprove(to, amount); // @audit front-run DOS  
+}
+```
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+
+Consider only allowing authorized actors to call `approve()` function. 
+Or only allowing approve to `type(uint).max` value.
+
+
+
+
+## Discussion
+
+**aktech297**
+
+Fix is done such that the approve function can be called by trusted caller. 
+I see changes like importing the Trust from sense-v1 and setting the trusted address during contract creation.
+
+**jparklev**
+
+Fix: https://github.com/sense-finance/auto-roller/pull/15
+
+**aktech297**
+
+Fixes are confirmed...
+
+
+
+# Issue H-3: AutoRoller#eject can be used to steal all the yield from vault's YTs 
 
 Source: https://github.com/sherlock-audit/2022-11-sense-judging/issues/22 
 
@@ -254,9 +316,19 @@ Fix: https://github.com/sense-finance/auto-roller/pull/21
 The fix that is done inside the eject function looks good.
 Also, there are three new functions are added, I am looking for clarification from @sherlock-admin to confirm whether they are also part of audit and need to be reviewed.
 
+**jacksanford1**
+
+Bringing in a Discord comment from @aktech297:
+
+> After looking at the code changes, my observation is: initially the issue is identified in eject function and the changes in eject are fixed in that function alone...after looking at other places, the dev team identified similar issues in other places and added the new functions with an appropriate collect function that ensures fairness in the system. Overall the changes look good.
+
+**jacksanford1**
+
+Categorized as "fixed."
 
 
-# Issue H-3: Adversary can brick AutoRoller by creating another AutoRoller on the same adapter 
+
+# Issue H-4: Adversary can brick AutoRoller by creating another AutoRoller on the same adapter 
 
 Source: https://github.com/sherlock-audit/2022-11-sense-judging/issues/20 
 
@@ -373,66 +445,12 @@ Even the trusted caller should not be allowed to create auto roller with maturit
 
 
 
-# Issue M-1: Anyone can spend on behalf of roller periphery 
-
-Source: https://github.com/sherlock-audit/2022-11-sense-judging/issues/48 
-
-## Found by 
-supernova, 0x52, minhquanym, 8olidity, ctf\_sec, cryptphi, pashov
-
-## Summary
-The approve() function in RollerPeriphery contract allows anyone to spend ERC20 token owned by the contract
-
-## Vulnerability Detail
-RollerPeriphery.approve() does not have any access control, this allows any user to be able to call the approve call which would make an ERC20 approve call to the token inputed, and allowing the 'to' address to spend. In the cases where RollerPeriphery owns some ERC20 tokens. The user will be able to transfer the tokens from the contract as a spender.
-
-## Impact
-Loss of funds
-
-## Code Snippet
-https://github.com/sherlock-audit/2022-11-sense/blob/main/contracts/src/RollerPeriphery.sol#L100-L102
-
-```solidity
-function approve(ERC20 token, address to, uint256 amount) public payable {
-        token.safeApprove(to, amount);
-    }
-```
-
-ERC20 approve call is:
-```solidity
-function approve(address spender, uint256 amount) public virtual returns (bool) {
-        allowance[msg.sender][spender] = amount;
-
-        emit Approval(msg.sender, spender, amount);
-
-        return true;
-    }
-```
-
-## Tool used
-Manual Review
-
-## Recommendation
-There should be some access control, according to the provided contracts, this function is called by RollerFactory, this can be the only address allowed to call the RollerPeriphery.approve() function.
-
-## Discussion
-
-**jparklev**
-
-We don't expect that the Periphery will ever hold onto funds of its own, so this is acceptable behavior to us. However, the DOS version of this ticket #46 might be valid as a `medium`
-
-**Evert0x**
-
-Grouping all as medium as they point out the same flaw with different impacts.
-
-
-
-# Issue M-2: Vulnerability related to ‘Optimizer Bug Regarding Memory Side Effects of Inline Assembly’ 
+# Issue M-1: Vulnerability related to ‘Optimizer Bug Regarding Memory Side Effects of Inline Assembly’ 
 
 Source: https://github.com/sherlock-audit/2022-11-sense-judging/issues/39 
 
 ## Found by 
-0xheynacho, 0xSmartContract
+0xSmartContract, 0xheynacho
 
 ## Summary
 Solidity versions 0.8.13 and 0.8.14 are vulnerable to a recently reported [optimizer bug](https://blog.soliditylang.org/2022/06/15/inline-assembly-memory-side-effects-bug/) related to inline assembly. Solidity 0.8.15 has been released with a fix.
@@ -491,7 +509,7 @@ Verified the fix. The contracts are  updated with 0.8.15 compiler version.
 
 
 
-# Issue M-3: AutoRoller.sol#roll can revert if lastSettle is zero because solmate ERC4626 deposit revert if previewDeposit returns 0 
+# Issue M-2: AutoRoller.sol#roll can revert if lastSettle is zero because solmate ERC4626 deposit revert if previewDeposit returns 0 
 
 Source: https://github.com/sherlock-audit/2022-11-sense-judging/issues/33 
 
@@ -633,9 +651,17 @@ Further adding, a simple test is needed to ensure the function flow to confirm w
         return previewedLPBal.mulDivDown(totalSupply, _space.balanceOf(address(this)));
     }
 
+**jacksanford1**
+
+Bringing in a comment from the protocol team:
+
+> We agreed with ak1's comment on this one and, while in theory valid, considered it a prohibitively expensive attack. 
+
+Categorizing it as acknowledged. 
 
 
-# Issue M-4: Math rounding in AutoRoller.sol is not ERC4626-complicant: previewWithdraw should round up. 
+
+# Issue M-3: Math rounding in AutoRoller.sol is not ERC4626-complicant: previewWithdraw should round up. 
 
 Source: https://github.com/sherlock-audit/2022-11-sense-judging/issues/30 
 
@@ -770,7 +796,7 @@ Verified the fix. As @jparklev mentioned, `rounding needs to be in the answer as
 
 
 
-# Issue M-5: Hardcoded divider address in RollerUtils is incorrect and will brick autoroller 
+# Issue M-4: Hardcoded divider address in RollerUtils is incorrect and will brick autoroller 
 
 Source: https://github.com/sherlock-audit/2022-11-sense-judging/issues/19 
 
@@ -828,12 +854,12 @@ As a suggestion, input address can be validated.
 
 
 
-# Issue M-6: Code does not handle ERC20 tokens with special `transfer` implementation 
+# Issue M-5: Code does not handle ERC20 tokens with special `transfer` implementation 
 
 Source: https://github.com/sherlock-audit/2022-11-sense-judging/issues/10 
 
 ## Found by 
-cryptphi, pashov
+pashov, cryptphi
 
 ## Summary
 Calls to ERC20::transfer method should always be checked
